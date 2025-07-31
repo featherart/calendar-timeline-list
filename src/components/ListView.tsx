@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Edit, Trash2, Filter, ChevronDown, ChevronRight, Search, Tag, Plus, X, Palette } from 'lucide-react';
+import { Calendar, Clock, Check, Edit, Trash2, Filter, ChevronDown, ChevronRight, Search, Tag, Plus, X, Palette } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Event, Case } from './Calendar';
+import { set } from 'date-fns';
 
 interface ListViewProps {
   events: Event[];
@@ -28,6 +31,7 @@ const ListView: React.FC<ListViewProps> = ({
   const [newTag, setNewTag] = useState('');
   const [selectedTagColor, setSelectedTagColor] = useState({ base: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-200 hover:text-blue-900' });
   const [casesState, setCasesState] = useState<Case[]>(cases);
+  const [tagDropdownOpen, setTagDropdownOpen] = useState(false);
 
   // Color palette for tags with hover states
   const tagColors = [
@@ -125,15 +129,23 @@ const ListView: React.FC<ListViewProps> = ({
     setExpandedHearings(newExpanded);
   };
 
-  const handleAddTag = (caseId: string) => {
-    if (newTag.trim()) {
+ // Get all existing tags across all cases
+  const getAllExistingTags = () => {
+    const allTags = casesState.flatMap(c => c.tags);
+    return [...new Set(allTags)].sort();
+  };
+
+  const handleAddTag = (caseId: string, tagToAdd?: string) => {
+    // if no tag is provided, use the newTag state
+    const tagValue = tagToAdd || newTag.trim();
+    if (tagValue) {
       setCasesState(prevCases => prevCases.map(c => {
         if (c.id === caseId) {
           // Avoid duplicate tags
-          if (!c.tags.includes(newTag.trim())) {
+          if (!c.tags.includes(tagValue)) {
             return {
               ...c,
-              tags: [...c.tags, newTag.trim()]
+              tags: [...c.tags, tagValue]
             };
           }
         }
@@ -141,6 +153,7 @@ const ListView: React.FC<ListViewProps> = ({
       }));
       setNewTag('');
       setEditingTags(null);
+      setTagDropdownOpen(false);  // Close the dropdown after adding a tag
       setSelectedTagColor({ base: 'bg-blue-100 text-blue-800', hover: 'hover:bg-blue-200 hover:text-blue-900' }); // Reset to default
     }
   };
@@ -244,31 +257,61 @@ const ListView: React.FC<ListViewProps> = ({
                       ))}
                        {isEditingTags && (
                         <div className="flex items-center space-x-2 bg-gray-50 p-2 rounded-md border" onClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={newTag}
-                            onChange={(e) => setNewTag(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleAddTag(caseId);
-                              }
-                              if (e.key === 'Escape') {
-                                setEditingTags(null);
-                                setNewTag('');
-                              }
-                            }}
-                            onBlur={(e) => {
-                              // Only close if clicking outside the tag editing area
-                              if (!e.relatedTarget || !e.currentTarget.parentElement?.contains(e.relatedTarget as Node)) {
-                                setTimeout(() => {
-                                  setEditingTags(null);
-                                  setNewTag('');
-                                }, 150);
-                              }
-                            }}
-                            placeholder="Add tag..."
-                            className="h-6 text-xs w-24"
-                            autoFocus
-                          />
+                          <Popover open={tagDropdownOpen} onOpenChange={setTagDropdownOpen}>
+                            <PopoverTrigger asChild>
+                               <Button
+                                 variant="outline"
+                                 role="combobox"
+                                 aria-expanded={tagDropdownOpen}
+                                 className="h-6 text-xs w-32 justify-between p-1"
+                                 onClick={() => setTagDropdownOpen(true)}
+                               >
+                                 {newTag || "Add tag..."}
+                                 <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                               </Button>
+                             </PopoverTrigger>
+                             <PopoverContent className="w-48 p-0" align="start">
+                               <Command>
+                                 <CommandInput 
+                                   placeholder="Search or add tag..." 
+                                   value={newTag}
+                                   onValueChange={setNewTag}
+                                 />
+                                 <CommandList>
+                                   <CommandEmpty>
+                                     <div className="p-2">
+                                       <Button
+                                         variant="ghost"
+                                         className="w-full justify-start text-left h-auto p-2"
+                                         onClick={() => handleAddTag(caseId)}
+                                       >
+                                         <Plus className="mr-2 h-3 w-3" />
+                                         Add "{newTag}"
+                                       </Button>
+                                     </div>
+                                   </CommandEmpty>
+                                   <CommandGroup>
+                                     {getAllExistingTags()
+                                       .filter(tag => 
+                                         tag.toLowerCase().includes(newTag.toLowerCase()) &&
+                                         !caseInfo.caseData.tags.includes(tag)
+                                       )
+                                       .map((tag) => (
+                                         <CommandItem
+                                           key={tag}
+                                           value={tag}
+                                           onSelect={() => handleAddTag(caseId, tag)}
+                                         >
+                                           <Check className="mr-2 h-3 w-3 opacity-0" />
+                                           {tag}
+                                         </CommandItem>
+                                       ))
+                                     }
+                                   </CommandGroup>
+                                 </CommandList>
+                               </Command>
+                             </PopoverContent>
+                           </Popover>
                           <div className="flex items-center space-x-1">
                             <Palette className="h-3 w-3 text-gray-400" />
                             <div className="flex space-x-1">
@@ -321,33 +364,68 @@ const ListView: React.FC<ListViewProps> = ({
                       >
                         Add tags...
                       </Button>
+                      {/*  this 2nd version of the input is for when there are no tags yet
+                            it's redundant and should be refactored to avoid duplication
+                            we'll keep it for now until we are sure we want to keep the feature
+                      
+                      */}
                       {isEditingTags && (
                         <div className="flex items-center space-x-2 bg-gray-50 p-2 rounded-md border" onClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={newTag}
-                            onChange={(e) => setNewTag(e.target.value)}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                handleAddTag(caseId);
-                              }
-                              if (e.key === 'Escape') {
-                                setEditingTags(null);
-                                setNewTag('');
-                              }
-                            }}
-                            onBlur={(e) => {
-                              // Only close if clicking outside the tag editing area
-                              if (!e.relatedTarget || !e.currentTarget.parentElement?.contains(e.relatedTarget as Node)) {
-                                setTimeout(() => {
-                                  setEditingTags(null);
-                                  setNewTag('');
-                                }, 150);
-                              }
-                            }}
-                            placeholder="Add tag..."
-                            className="h-6 text-xs w-24"
-                            autoFocus
-                          />
+                          <Popover open={tagDropdownOpen} onOpenChange={setTagDropdownOpen}>
+                             <PopoverTrigger asChild>
+                               <Button
+                                 variant="outline"
+                                 role="combobox"
+                                 aria-expanded={tagDropdownOpen}
+                                 className="h-6 text-xs w-32 justify-between p-1"
+                                 onClick={() => setTagDropdownOpen(true)}
+                               >
+                                 {newTag || "Add tag..."}
+                                 <ChevronDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+                               </Button>
+                             </PopoverTrigger>
+                             <PopoverContent className="w-48 p-0" align="start">
+                               <Command>
+                                 <CommandInput
+                                   placeholder="Search or add tag..."
+                                   value={newTag}
+                                   onValueChange={setNewTag}
+                                 />
+                                 <CommandList>
+                                   <CommandEmpty>
+                                     <div className="p-2">
+                                       <Button
+                                         variant="ghost"
+                                         className="w-full justify-start text-left h-auto p-2"
+                                         onClick={() => handleAddTag(caseId)}
+                                       >
+                                         <Plus className="mr-2 h-3 w-3" />
+                                         Add "{newTag}"
+                                       </Button>
+                                     </div>
+                                   </CommandEmpty>
+                                   <CommandGroup>
+                                     {getAllExistingTags()
+                                       .filter(tag =>
+                                         tag.toLowerCase().includes(newTag.toLowerCase()) &&
+                                         !caseInfo.caseData.tags.includes(tag)
+                                       )
+                                       .map((tag) => (
+                                         <CommandItem
+                                           key={tag}
+                                           value={tag}
+                                           onSelect={() => handleAddTag(caseId, tag)}
+                                         >
+                                           <Check className="mr-2 h-3 w-3 opacity-0" />
+                                           {tag}
+                                         </CommandItem>
+                                       ))
+                                     }
+                                   </CommandGroup>
+                                 </CommandList>
+                               </Command>
+                             </PopoverContent>
+                           </Popover>
                           <div className="flex items-center space-x-1">
                             <Palette className="h-3 w-3 text-gray-400" />
                             <div className="flex space-x-1">
